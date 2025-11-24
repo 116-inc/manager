@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EC2 Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .status {
+            padding: 10px;
+            margin: 20px 0;
+            border-radius: 4px;
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        button {
+            background: #1976d2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1565c0;
+        }
+        .info {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>EC2 Manager</h1>
+        <div class="status" id="status">Ready</div>
+        <div class="info" id="info">Click the button to test the API</div>
+        <button onclick="testAPI()">Test API</button>
+    </div>
+
+    <script>
+        async function testAPI() {
+            const statusEl = document.getElementById('status');
+            const infoEl = document.getElementById('info');
+
+            statusEl.textContent = 'Loading...';
+
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                statusEl.textContent = 'Success';
+                statusEl.style.background = '#c8e6c9';
+                statusEl.style.color = '#2e7d32';
+                infoEl.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                statusEl.textContent = 'Error';
+                statusEl.style.background = '#ffcdd2';
+                statusEl.style.color = '#c62828';
+                infoEl.textContent = error.message;
+            }
+        }
+    </script>
+</body>
+</html>
