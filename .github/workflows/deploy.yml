@@ -49,8 +49,11 @@ jobs:
         run: |
           cd infra/terraform/manager
           terraform apply -auto-approve
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Get Function URL
         run: |
           cd infra/terraform/manager
           terraform output lambda_function_url
+          terraform output manager_url
