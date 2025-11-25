@@ -69,9 +69,8 @@ def validate_cf_access_jwt(token):
 
 def lambda_handler(event, context):
     """
-    API handler for EC2 Manager.
-    Handles API requests routed from manager.116.capital/api/*
-    Same origin = no CORS headers needed!
+    Info API handler for EC2 Manager.
+    Handles API requests routed from manager.116.capital/api/info
     SECURITY: Validates Cloudflare Access JWT token
     """
     # Extract request details
@@ -103,16 +102,17 @@ def lambda_handler(event, context):
     # Get authenticated user from JWT payload
     authenticated_user = jwt_payload.get('email', 'unknown')
 
-    # Status endpoint - handles /api/status
-    if path == '/api/status' and method == 'GET':
+    # Info endpoint - handles /api/info
+    if path == '/api/info' and method == 'GET':
         return {
             'statusCode': 200,
             'headers': response_headers,
             'body': json.dumps({
-                'status': 'ok',
-                'message': 'API is working',
+                'service': 'EC2 Manager Info Service',
+                'version': '1.0.0',
                 'authenticated_user': authenticated_user,
-                'environment': 'production'
+                'permissions': ['read', 'describe'],
+                'region': 'us-east-1'
             })
         }
 
