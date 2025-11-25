@@ -4,7 +4,8 @@ import json
 def lambda_handler(event, context):
     """
     API handler for EC2 Manager.
-    Handles API requests from Cloudflare Pages frontend.
+    Handles API requests routed from manager.116.capital/api/*
+    Same origin = no CORS headers needed!
     """
     # Extract request details
     path = event.get('rawPath', '/')
@@ -14,36 +15,16 @@ def lambda_handler(event, context):
     # Get authenticated user from Cloudflare Access header
     authenticated_user = headers.get('cf-access-authenticated-user-email', 'unknown')
 
-    # Determine origin for CORS
-    origin = headers.get('origin', '')
-    allowed_origins = [
-        'https://manager.116.capital',
-        'https://manager-8ea.pages.dev'
-    ]
-    cors_origin = origin if origin in allowed_origins else 'https://manager.116.capital'
-
-    # CORS headers
-    cors_headers = {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': cors_origin,
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': '*',
-        'Access-Control-Allow-Credentials': 'true',
+    # Response headers
+    response_headers = {
+        'Content-Type': 'application/json'
     }
 
-    # Handle OPTIONS for CORS preflight
-    if method == 'OPTIONS':
+    # Status endpoint - handles /api/status
+    if path == '/api/status' and method == 'GET':
         return {
             'statusCode': 200,
-            'headers': cors_headers,
-            'body': ''
-        }
-
-    # Status endpoint
-    if path == '/status' and method == 'GET':
-        return {
-            'statusCode': 200,
-            'headers': cors_headers,
+            'headers': response_headers,
             'body': json.dumps({
                 'status': 'ok',
                 'message': 'API is working',
@@ -55,7 +36,7 @@ def lambda_handler(event, context):
     # 404 for other paths
     return {
         'statusCode': 404,
-        'headers': cors_headers,
+        'headers': response_headers,
         'body': json.dumps({
             'error': 'Not found',
             'path': path,

@@ -59,8 +59,6 @@
     </div>
 
     <script>
-        const API_BASE_URL = 'https://manager-api.116.capital';
-
         async function testAPI() {
             const statusEl = document.getElementById('status');
             const infoEl = document.getElementById('info');
@@ -68,7 +66,7 @@
             statusEl.textContent = 'Loading...';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/status`, {
+                const response = await fetch('/api/status', {
                     credentials: 'include'
                 });
                 const data = await response.json();
