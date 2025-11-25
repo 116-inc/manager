@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout manager repo
+        uses: actions/checkout@v4
+        with:
+          path: manager
+
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: 116-inc/infra
+          path: infra
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Package Lambda function
+        run: |
+          mkdir -p infra/build
+          cd manager
+          zip -r ../infra/build/manager.zip app.py index.html
+
+      - name: Terraform Init
+        run: |
+          cd infra/terraform/manager
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd infra/terraform/manager
+          terraform apply -auto-approve
+
+      - name: Get Function URL
+        run: |
+          cd infra/terraform/manager
+          terraform output lambda_function_url
