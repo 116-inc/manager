@@ -34,13 +34,14 @@ def lambda_handler(event, context):
     Handles API requests routed from manager.116.capital/api/*
     Same origin = no CORS headers needed!
     SECURITY: Validates source IP is from Cloudflare network
+    Note: HTTP API Gateway doesn't support resource policies, so we validate in Lambda
     """
     # Extract request details
     path = event.get('rawPath', '/')
     method = event.get('requestContext', {}).get('http', {}).get('method', 'GET')
     headers = event.get('headers', {})
 
-    # Get source IP
+    # Get source IP from API Gateway event (cannot be spoofed)
     source_ip = event.get('requestContext', {}).get('http', {}).get('sourceIp')
 
     # Response headers
@@ -48,7 +49,7 @@ def lambda_handler(event, context):
         'Content-Type': 'application/json'
     }
 
-    # SECURITY: Block requests not from Cloudflare
+    # SECURITY: Block requests not from Cloudflare network
     if not source_ip or not is_cloudflare_ip(source_ip):
         return {
             'statusCode': 403,
