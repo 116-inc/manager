@@ -54,12 +54,13 @@
     <div class="container">
         <h1>EC2 Manager</h1>
         <div class="status" id="status">Ready</div>
-        <div class="info" id="info">Click the button to test the API</div>
-        <button onclick="testAPI()">Test API</button>
+        <div class="info" id="info">Click a button to test the API</div>
+        <button onclick="testStatus()">Test Status API</button>
+        <button onclick="testInfo()">Test Info API</button>
     </div>
 
     <script>
-        async function testAPI() {
+        async function testStatus() {
             const statusEl = document.getElementById('status');
             const infoEl = document.getElementById('info');
 
@@ -71,9 +72,33 @@
                 });
                 const data = await response.json();
 
-                statusEl.textContent = 'Success';
+                statusEl.textContent = 'Status API - Success';
                 statusEl.style.background = '#c8e6c9';
                 statusEl.style.color = '#2e7d32';
+                infoEl.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                statusEl.textContent = 'Error';
+                statusEl.style.background = '#ffcdd2';
+                statusEl.style.color = '#c62828';
+                infoEl.textContent = error.message;
+            }
+        }
+
+        async function testInfo() {
+            const statusEl = document.getElementById('status');
+            const infoEl = document.getElementById('info');
+
+            statusEl.textContent = 'Loading...';
+
+            try {
+                const response = await fetch('/api/info', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+
+                statusEl.textContent = 'Info API - Success';
+                statusEl.style.background = '#e1bee7';
+                statusEl.style.color = '#6a1b9a';
                 infoEl.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
             } catch (error) {
                 statusEl.textContent = 'Error';
