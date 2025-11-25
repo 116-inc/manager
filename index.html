@@ -59,6 +59,8 @@
     </div>
 
     <script>
+        const API_BASE_URL = 'https://api.manager.i.116.capital';
+
         async function testAPI() {
             const statusEl = document.getElementById('status');
             const infoEl = document.getElementById('info');
@@ -66,13 +68,15 @@
             statusEl.textContent = 'Loading...';
 
             try {
-                const response = await fetch('/api/status');
+                const response = await fetch(`${API_BASE_URL}/status`, {
+                    credentials: 'include'
+                });
                 const data = await response.json();
 
                 statusEl.textContent = 'Success';
                 statusEl.style.background = '#c8e6c9';
                 statusEl.style.color = '#2e7d32';
-                infoEl.textContent = JSON.stringify(data, null, 2);
+                infoEl.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
             } catch (error) {
                 statusEl.textContent = 'Error';
                 statusEl.style.background = '#ffcdd2';

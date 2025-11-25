@@ -38,7 +38,7 @@ jobs:
         run: |
           mkdir -p infra/build
           cd manager
-          zip -r ../infra/build/manager.zip app.py index.html
+          zip ../infra/build/manager.zip app.py
 
       - name: Terraform Init
         run: |
@@ -52,8 +52,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-      - name: Get Function URL
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 8f7e858280cfe801bb6c141b2f6461bb
+          projectName: manager
+          directory: manager
+          gitHubToken: ${{ secrets.GH_PAT }}
+
+      - name: Get URLs
         run: |
           cd infra/terraform/manager
-          terraform output lambda_function_url
+          terraform output api_gateway_url
           terraform output manager_url
+          terraform output api_url
