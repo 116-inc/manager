@@ -14,12 +14,21 @@ def lambda_handler(event, context):
     # Get authenticated user from Cloudflare Access header
     authenticated_user = headers.get('cf-access-authenticated-user-email', 'unknown')
 
+    # Determine origin for CORS
+    origin = headers.get('origin', '')
+    allowed_origins = [
+        'https://manager.116.capital',
+        'https://manager-8ea.pages.dev'
+    ]
+    cors_origin = origin if origin in allowed_origins else 'https://manager.116.capital'
+
     # CORS headers
     cors_headers = {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': 'https://manager.116.capital',
+        'Access-Control-Allow-Origin': cors_origin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Credentials': 'true',
     }
 
     # Handle OPTIONS for CORS preflight
