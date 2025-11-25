@@ -17,7 +17,7 @@ def lambda_handler(event, context):
     # CORS headers
     cors_headers = {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': 'https://manager.i.116.capital',
+        'Access-Control-Allow-Origin': 'https://manager.116.capital',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': '*',
     }
