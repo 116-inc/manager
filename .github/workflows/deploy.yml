@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy Frontend
 
 on:
   push:
@@ -10,47 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout manager repo
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: manager
-
-      - name: Checkout infra repo
-        uses: actions/checkout@v4
-        with:
-          repository: 116-inc/infra
-          path: infra
-          token: ${{ secrets.GH_PAT }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.0
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Package Lambda function
-        run: |
-          mkdir -p infra/build
-          cd manager
-          zip ../infra/build/manager.zip app.py
-
-      - name: Terraform Init
-        run: |
-          cd infra/terraform/manager
-          terraform init
-
-      - name: Terraform Apply
-        run: |
-          cd infra/terraform/manager
-          terraform apply -auto-approve
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -58,12 +19,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 8f7e858280cfe801bb6c141b2f6461bb
           projectName: manager
-          directory: manager
+          directory: .
           gitHubToken: ${{ secrets.GH_PAT }}
-
-      - name: Get URLs
-        run: |
-          cd infra/terraform/manager
-          terraform output api_gateway_url
-          terraform output manager_url
-          terraform output api_url
