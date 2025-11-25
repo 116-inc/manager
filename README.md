@@ -19,3 +19,4 @@ Simple web app for managing EC2 instances, protected by Cloudflare Zero Trust.
 ## Deployment
 
 Push to main branch triggers automatic deployment via GitHub Actions.
+# Trigger deployment
