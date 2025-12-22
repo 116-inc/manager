@@ -3,7 +3,6 @@ import jwt
 import requests
 import os
 import sqlite3
-from functools import lru_cache
 
 # Cloudflare Access Team Domain
 TEAM_DOMAIN = "116capital.cloudflareaccess.com"
@@ -51,7 +50,6 @@ def increment_counter():
     conn.close()
     return result[0] if result else 0
 
-@lru_cache(maxsize=1)
 def get_cloudflare_public_keys():
     """Fetch Cloudflare Access public keys for JWT validation"""
     certs_url = f"https://{TEAM_DOMAIN}/cdn-cgi/access/certs"
