@@ -48,11 +48,49 @@
             background: #f5f5f5;
             border-radius: 4px;
         }
+        .counter-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .counter-section h2 {
+            margin: 0 0 15px 0;
+            color: #333;
+        }
+        .counter-display {
+            font-size: 64px;
+            font-weight: bold;
+            color: #1976d2;
+            margin: 20px 0;
+        }
+        .counter-btn {
+            background: #4caf50;
+            font-size: 18px;
+            padding: 15px 40px;
+        }
+        .counter-btn:hover {
+            background: #43a047;
+        }
+        h2 {
+            color: #666;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>EC2 Manager</h1>
+
+        <div class="counter-section">
+            <h2>Counter</h2>
+            <div class="counter-display" id="counter-display">--</div>
+            <button onclick="incrementCounter()" class="counter-btn">Click to Increment</button>
+        </div>
+
+        <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
+
+        <h2>API Tests</h2>
         <div class="status" id="status">Ready</div>
         <div class="info" id="info">Click a button to test the API</div>
         <button onclick="testStatus()">Test Status API</button>
@@ -60,6 +98,42 @@
     </div>
 
     <script>
+        // Load counter on page load
+        async function loadCounter() {
+            const counterEl = document.getElementById('counter-display');
+            try {
+                const response = await fetch('/api/counter', {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                counterEl.textContent = data.counter;
+            } catch (error) {
+                counterEl.textContent = 'Error';
+                console.error('Failed to load counter:', error);
+            }
+        }
+
+        async function incrementCounter() {
+            const counterEl = document.getElementById('counter-display');
+            counterEl.style.opacity = '0.5';
+
+            try {
+                const response = await fetch('/api/counter', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                const data = await response.json();
+                counterEl.textContent = data.counter;
+            } catch (error) {
+                console.error('Failed to increment counter:', error);
+            } finally {
+                counterEl.style.opacity = '1';
+            }
+        }
+
+        // Load counter when page loads
+        document.addEventListener('DOMContentLoaded', loadCounter);
+
         async function testStatus() {
             const statusEl = document.getElementById('status');
             const infoEl = document.getElementById('info');

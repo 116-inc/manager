@@ -2,10 +2,54 @@ import json
 import jwt
 import requests
 import os
+import sqlite3
 from functools import lru_cache
 
 # Cloudflare Access Team Domain
 TEAM_DOMAIN = "116capital.cloudflareaccess.com"
+
+# Database path (mounted EFS)
+DB_PATH = os.environ.get('DB_PATH', '/mnt/data/manager.db')
+
+
+def init_db():
+    """Initialize SQLite database with required tables"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS counter (
+            id INTEGER PRIMARY KEY,
+            value INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    # Ensure there's a counter row
+    cursor.execute('INSERT OR IGNORE INTO counter (id, value) VALUES (1, 0)')
+    conn.commit()
+    conn.close()
+
+
+def get_counter():
+    """Get current counter value"""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM counter WHERE id = 1')
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else 0
+
+
+def increment_counter():
+    """Increment counter and return new value"""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE counter SET value = value + 1 WHERE id = 1')
+    conn.commit()
+    cursor.execute('SELECT value FROM counter WHERE id = 1')
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else 0
 
 @lru_cache(maxsize=1)
 def get_cloudflare_public_keys():
@@ -115,6 +159,53 @@ def lambda_handler(event, context):
                 'environment': 'production'
             })
         }
+
+    # Counter GET endpoint - handles /api/counter
+    if path == '/api/counter' and method == 'GET':
+        try:
+            value = get_counter()
+            return {
+                'statusCode': 200,
+                'headers': response_headers,
+                'body': json.dumps({
+                    'counter': value,
+                    'authenticated_user': authenticated_user
+                })
+            }
+        except Exception as e:
+            print(f"Error getting counter: {e}")
+            return {
+                'statusCode': 500,
+                'headers': response_headers,
+                'body': json.dumps({
+                    'error': 'Internal server error',
+                    'message': str(e)
+                })
+            }
+
+    # Counter POST endpoint - handles /api/counter (increment)
+    if path == '/api/counter' and method == 'POST':
+        try:
+            value = increment_counter()
+            return {
+                'statusCode': 200,
+                'headers': response_headers,
+                'body': json.dumps({
+                    'counter': value,
+                    'authenticated_user': authenticated_user,
+                    'action': 'incremented'
+                })
+            }
+        except Exception as e:
+            print(f"Error incrementing counter: {e}")
+            return {
+                'statusCode': 500,
+                'headers': response_headers,
+                'body': json.dumps({
+                    'error': 'Internal server error',
+                    'message': str(e)
+                })
+            }
 
     # 404 for other paths
     return {
