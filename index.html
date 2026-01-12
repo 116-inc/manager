@@ -3,184 +3,398 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EC2 Manager</title>
+    <title>Instance Manager</title>
     <style>
+        * { box-sizing: border-box; }
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 50px auto;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
             padding: 20px;
-            background: #f5f5f5;
+            background: #f0f2f5;
+            color: #333;
         }
         .container {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 1200px;
+            margin: 0 auto;
         }
         h1 {
-            color: #333;
-            margin-top: 0;
+            margin: 0 0 20px 0;
+            color: #1a1a1a;
         }
-        .status {
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+            color: #333;
+        }
+        .form-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #555;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
             padding: 10px;
-            margin: 20px 0;
-            border-radius: 4px;
-            background: #e3f2fd;
-            color: #1976d2;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #0066cc;
         }
         button {
-            background: #1976d2;
-            color: white;
-            border: none;
             padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
+            border: none;
+            border-radius: 6px;
             font-size: 14px;
-            margin: 5px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
         }
-        button:hover {
-            background: #1565c0;
+        .btn-primary {
+            background: #0066cc;
+            color: white;
         }
-        .info {
-            margin: 10px 0;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 4px;
+        .btn-primary:hover { background: #0052a3; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
         }
-        .counter-section {
-            text-align: center;
-            margin-bottom: 20px;
+        .btn-danger:hover { background: #c82333; }
+        .btn-success {
+            background: #28a745;
+            color: white;
         }
-        .counter-section h2 {
-            margin: 0 0 15px 0;
+        .btn-success:hover { background: #218838; }
+        .btn-warning {
+            background: #ffc107;
             color: #333;
         }
-        .counter-display {
-            font-size: 64px;
-            font-weight: bold;
-            color: #1976d2;
-            margin: 20px 0;
+        .btn-warning:hover { background: #e0a800; }
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
         }
-        .counter-btn {
-            background: #4caf50;
-            font-size: 18px;
-            padding: 15px 40px;
+        .instances-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
         }
-        .counter-btn:hover {
-            background: #43a047;
+        .instance-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
         }
-        h2 {
+        .instance-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .instance-name {
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .instance-state {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .state-running { background: #d4edda; color: #155724; }
+        .state-stopped { background: #f8d7da; color: #721c24; }
+        .state-pending { background: #fff3cd; color: #856404; }
+        .instance-details {
+            font-size: 13px;
             color: #666;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            margin-bottom: 10px;
         }
+        .instance-details div { margin: 4px 0; }
+        .instance-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .refresh-btn {
+            float: right;
+            background: #6c757d;
+            color: white;
+        }
+        .refresh-btn:hover { background: #5a6268; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>EC2 Manager</h1>
+        <h1>Instance Manager</h1>
 
-        <div class="counter-section">
-            <h2>Counter</h2>
-            <div class="counter-display" id="counter-display">--</div>
-            <button onclick="incrementCounter()" class="counter-btn">Click to Increment</button>
+        <div id="message"></div>
+
+        <div class="card">
+            <h2>Create New Instance</h2>
+            <form id="create-form" onsubmit="createInstance(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Instance Name</label>
+                        <input type="text" id="instance-name" required placeholder="my-instance">
+                    </div>
+                    <div class="form-group">
+                        <label>Blueprint (OS)</label>
+                        <select id="blueprint" required>
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Bundle (Size)</label>
+                        <select id="bundle" required>
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>SSH Key Pair (Optional)</label>
+                        <select id="keypair">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary" id="create-btn">Create Instance</button>
+            </form>
         </div>
 
-        <hr style="margin: 30px 0; border: none; border-top: 1px solid #ddd;">
-
-        <h2>API Tests</h2>
-        <div class="status" id="status">Ready</div>
-        <div class="info" id="info">Click a button to test the API</div>
-        <button onclick="testStatus()">Test Status API</button>
-        <button onclick="testInfo()">Test Info API</button>
+        <div class="card">
+            <h2>
+                Instances
+                <button onclick="loadInstances()" class="btn-sm refresh-btn">Refresh</button>
+            </h2>
+            <div id="instances-container">
+                <div class="loading">Loading instances...</div>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Load counter on page load
-        async function loadCounter() {
-            const counterEl = document.getElementById('counter-display');
+        const API = '';
+
+        async function api(path, options = {}) {
+            const res = await fetch(API + path, {
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                ...options
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Request failed');
+            return data;
+        }
+
+        function showMessage(text, type = 'success') {
+            const el = document.getElementById('message');
+            el.innerHTML = `<div class="${type}">${text}</div>`;
+            setTimeout(() => el.innerHTML = '', 5000);
+        }
+
+        async function loadBlueprints() {
             try {
-                const response = await fetch('/api/counter', {
-                    credentials: 'include'
+                const data = await api('/api/blueprints');
+                const select = document.getElementById('blueprint');
+                select.innerHTML = '<option value="">Select OS...</option>';
+
+                const groups = {};
+                data.blueprints.forEach(bp => {
+                    const group = bp.group || 'Other';
+                    if (!groups[group]) groups[group] = [];
+                    groups[group].push(bp);
                 });
-                const data = await response.json();
-                counterEl.textContent = data.counter;
-            } catch (error) {
-                counterEl.textContent = 'Error';
-                console.error('Failed to load counter:', error);
+
+                Object.entries(groups).forEach(([group, bps]) => {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = group;
+                    bps.forEach(bp => {
+                        const opt = document.createElement('option');
+                        opt.value = bp.id;
+                        opt.textContent = bp.name;
+                        optgroup.appendChild(opt);
+                    });
+                    select.appendChild(optgroup);
+                });
+            } catch (e) {
+                console.error('Failed to load blueprints:', e);
             }
         }
 
-        async function incrementCounter() {
-            const counterEl = document.getElementById('counter-display');
-            counterEl.style.opacity = '0.5';
+        async function loadBundles() {
+            try {
+                const data = await api('/api/bundles');
+                const select = document.getElementById('bundle');
+                select.innerHTML = '<option value="">Select size...</option>';
+                data.bundles.forEach(b => {
+                    const opt = document.createElement('option');
+                    opt.value = b.id;
+                    opt.textContent = `${b.name} - ${b.cpuCount} vCPU, ${b.ramSizeInGb}GB RAM, ${b.diskSizeInGb}GB SSD - $${b.price}/mo`;
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load bundles:', e);
+            }
+        }
+
+        async function loadKeypairs() {
+            try {
+                const data = await api('/api/keypairs');
+                const select = document.getElementById('keypair');
+                select.innerHTML = '<option value="">None</option>';
+                data.keypairs.forEach(kp => {
+                    const opt = document.createElement('option');
+                    opt.value = kp.name;
+                    opt.textContent = kp.name;
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load keypairs:', e);
+            }
+        }
+
+        async function loadInstances() {
+            const container = document.getElementById('instances-container');
+            container.innerHTML = '<div class="loading">Loading instances...</div>';
 
             try {
-                const response = await fetch('/api/counter', {
+                const data = await api('/api/instances');
+                if (data.instances.length === 0) {
+                    container.innerHTML = '<p>No instances found. Create one above.</p>';
+                    return;
+                }
+
+                container.innerHTML = '<div class="instances-grid">' +
+                    data.instances.map(inst => `
+                        <div class="instance-card">
+                            <div class="instance-header">
+                                <span class="instance-name">${inst.name}</span>
+                                <span class="instance-state state-${inst.state}">${inst.state}</span>
+                            </div>
+                            <div class="instance-details">
+                                <div><strong>IP:</strong> ${inst.publicIp || 'N/A'}</div>
+                                <div><strong>Blueprint:</strong> ${inst.blueprintId}</div>
+                                <div><strong>Bundle:</strong> ${inst.bundleId}</div>
+                                <div><strong>Region:</strong> ${inst.region}</div>
+                            </div>
+                            <div class="instance-actions">
+                                ${inst.state === 'stopped' ?
+                                    `<button class="btn-success btn-sm" onclick="instanceAction('${inst.name}', 'start')">Start</button>` : ''}
+                                ${inst.state === 'running' ?
+                                    `<button class="btn-warning btn-sm" onclick="instanceAction('${inst.name}', 'stop')">Stop</button>` : ''}
+                                ${inst.state === 'running' ?
+                                    `<button class="btn-sm" onclick="instanceAction('${inst.name}', 'reboot')">Reboot</button>` : ''}
+                                <button class="btn-danger btn-sm" onclick="deleteInstance('${inst.name}')">Delete</button>
+                            </div>
+                        </div>
+                    `).join('') +
+                '</div>';
+            } catch (e) {
+                container.innerHTML = `<div class="error">Failed to load instances: ${e.message}</div>`;
+            }
+        }
+
+        async function createInstance(e) {
+            e.preventDefault();
+            const btn = document.getElementById('create-btn');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+
+            try {
+                const payload = {
+                    name: document.getElementById('instance-name').value,
+                    blueprintId: document.getElementById('blueprint').value,
+                    bundleId: document.getElementById('bundle').value,
+                    availabilityZone: 'us-east-1a'
+                };
+                const keypair = document.getElementById('keypair').value;
+                if (keypair) payload.keyPairName = keypair;
+
+                await api('/api/instances', {
                     method: 'POST',
-                    credentials: 'include'
+                    body: JSON.stringify(payload)
                 });
-                const data = await response.json();
-                counterEl.textContent = data.counter;
-            } catch (error) {
-                console.error('Failed to increment counter:', error);
+
+                showMessage(`Instance "${payload.name}" is being created...`);
+                document.getElementById('instance-name').value = '';
+                setTimeout(loadInstances, 2000);
+            } catch (e) {
+                showMessage(e.message, 'error');
             } finally {
-                counterEl.style.opacity = '1';
+                btn.disabled = false;
+                btn.textContent = 'Create Instance';
             }
         }
 
-        // Load counter when page loads
-        document.addEventListener('DOMContentLoaded', loadCounter);
-
-        async function testStatus() {
-            const statusEl = document.getElementById('status');
-            const infoEl = document.getElementById('info');
-
-            statusEl.textContent = 'Loading...';
-
+        async function instanceAction(name, action) {
             try {
-                const response = await fetch('/api/status', {
-                    credentials: 'include'
-                });
-                const data = await response.json();
-
-                statusEl.textContent = 'Status API - Success';
-                statusEl.style.background = '#c8e6c9';
-                statusEl.style.color = '#2e7d32';
-                infoEl.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            } catch (error) {
-                statusEl.textContent = 'Error';
-                statusEl.style.background = '#ffcdd2';
-                statusEl.style.color = '#c62828';
-                infoEl.textContent = error.message;
+                await api(`/api/instances/${name}/${action}`, { method: 'POST' });
+                showMessage(`Instance "${name}" is ${action}ing...`);
+                setTimeout(loadInstances, 2000);
+            } catch (e) {
+                showMessage(e.message, 'error');
             }
         }
 
-        async function testInfo() {
-            const statusEl = document.getElementById('status');
-            const infoEl = document.getElementById('info');
-
-            statusEl.textContent = 'Loading...';
-
+        async function deleteInstance(name) {
+            if (!confirm(`Delete instance "${name}"? This cannot be undone.`)) return;
             try {
-                const response = await fetch('/api/info', {
-                    credentials: 'include'
-                });
-                const data = await response.json();
-
-                statusEl.textContent = 'Info API - Success';
-                statusEl.style.background = '#e1bee7';
-                statusEl.style.color = '#6a1b9a';
-                infoEl.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            } catch (error) {
-                statusEl.textContent = 'Error';
-                statusEl.style.background = '#ffcdd2';
-                statusEl.style.color = '#c62828';
-                infoEl.textContent = error.message;
+                await api(`/api/instances/${name}`, { method: 'DELETE' });
+                showMessage(`Instance "${name}" is being deleted...`);
+                setTimeout(loadInstances, 2000);
+            } catch (e) {
+                showMessage(e.message, 'error');
             }
         }
+
+        // Load everything on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadBlueprints();
+            loadBundles();
+            loadKeypairs();
+            loadInstances();
+        });
     </script>
 </body>
 </html>

@@ -3,12 +3,26 @@ import jwt
 import requests
 import os
 import sqlite3
+import boto3
+from fastapi import FastAPI, Request, HTTPException, Depends
+from mangum import Mangum
 
 # Cloudflare Access Team Domain
 TEAM_DOMAIN = "116capital.cloudflareaccess.com"
 
 # Database path (mounted EFS)
 DB_PATH = os.environ.get('DB_PATH', '/mnt/data/manager.db')
+
+app = FastAPI(title="EC2 Manager API")
+
+
+# --- Database ---
+
+def get_db():
+    """Get database connection - must be created per-request for thread safety"""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db():
@@ -21,34 +35,16 @@ def init_db():
             value INTEGER NOT NULL DEFAULT 0
         )
     ''')
-    # Ensure there's a counter row
     cursor.execute('INSERT OR IGNORE INTO counter (id, value) VALUES (1, 0)')
     conn.commit()
     conn.close()
 
 
-def get_counter():
-    """Get current counter value"""
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT value FROM counter WHERE id = 1')
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else 0
+# Initialize on cold start
+init_db()
 
 
-def increment_counter():
-    """Increment counter and return new value"""
-    init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('UPDATE counter SET value = value + 1 WHERE id = 1')
-    conn.commit()
-    cursor.execute('SELECT value FROM counter WHERE id = 1')
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else 0
+# --- Auth ---
 
 def get_cloudflare_public_keys():
     """Fetch Cloudflare Access public keys for JWT validation"""
@@ -61,23 +57,21 @@ def get_cloudflare_public_keys():
         print(f"Error fetching Cloudflare public keys: {e}")
         return None
 
-def validate_cf_access_jwt(token):
+
+def validate_cf_access_jwt(token: str):
     """Validate Cloudflare Access JWT token"""
     if not token:
         return None
 
     try:
-        # Get public keys
         keys_data = get_cloudflare_public_keys()
         if not keys_data or 'keys' not in keys_data:
             print("Failed to fetch Cloudflare public keys")
             return None
 
-        # Get the key ID from token header
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get('kid')
 
-        # Find matching public key
         public_key = None
         for key in keys_data['keys']:
             if key['kid'] == kid:
@@ -88,7 +82,6 @@ def validate_cf_access_jwt(token):
             print(f"No matching public key found for kid: {kid}")
             return None
 
-        # Verify and decode JWT
         decoded = jwt.decode(
             token,
             public_key,
@@ -109,109 +102,254 @@ def validate_cf_access_jwt(token):
         print(f"Error validating JWT: {e}")
         return None
 
-def lambda_handler(event, context):
-    """
-    API handler for EC2 Manager.
-    Handles API requests routed from manager.116.capital/api/*
-    Same origin = no CORS headers needed!
-    SECURITY: Validates Cloudflare Access JWT token
-    """
-    # Extract request details
-    path = event.get('rawPath', '/')
-    method = event.get('requestContext', {}).get('http', {}).get('method', 'GET')
-    headers = event.get('headers', {})
 
-    # Response headers
-    response_headers = {
-        'Content-Type': 'application/json'
-    }
+async def get_current_user(request: Request) -> dict:
+    """Dependency to get authenticated user from Cloudflare Access JWT"""
+    cf_token = request.headers.get('cf-access-jwt-assertion') or request.headers.get('cf-authorization')
 
-    # Get JWT token from Cloudflare Access headers
-    # Cloudflare Access automatically adds cf-access-jwt-assertion header
-    cf_token = headers.get('cf-access-jwt-assertion') or headers.get('cf-authorization')
-
-    # SECURITY: Validate Cloudflare Access JWT
     jwt_payload = validate_cf_access_jwt(cf_token)
     if not jwt_payload:
-        return {
-            'statusCode': 403,
-            'headers': response_headers,
-            'body': json.dumps({
-                'error': 'Forbidden',
-                'message': 'Access denied. Invalid or missing Cloudflare Access token.'
-            })
-        }
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Invalid or missing Cloudflare Access token."
+        )
 
-    # Get authenticated user from JWT payload
-    authenticated_user = jwt_payload.get('email', 'unknown')
-
-    # Status endpoint - handles /api/status
-    if path == '/api/status' and method == 'GET':
-        return {
-            'statusCode': 200,
-            'headers': response_headers,
-            'body': json.dumps({
-                'status': 'ok',
-                'message': 'API is working',
-                'authenticated_user': authenticated_user,
-                'environment': 'production'
-            })
-        }
-
-    # Counter GET endpoint - handles /api/counter
-    if path == '/api/counter' and method == 'GET':
-        try:
-            value = get_counter()
-            return {
-                'statusCode': 200,
-                'headers': response_headers,
-                'body': json.dumps({
-                    'counter': value,
-                    'authenticated_user': authenticated_user
-                })
-            }
-        except Exception as e:
-            print(f"Error getting counter: {e}")
-            return {
-                'statusCode': 500,
-                'headers': response_headers,
-                'body': json.dumps({
-                    'error': 'Internal server error',
-                    'message': str(e)
-                })
-            }
-
-    # Counter POST endpoint - handles /api/counter (increment)
-    if path == '/api/counter' and method == 'POST':
-        try:
-            value = increment_counter()
-            return {
-                'statusCode': 200,
-                'headers': response_headers,
-                'body': json.dumps({
-                    'counter': value,
-                    'authenticated_user': authenticated_user,
-                    'action': 'incremented'
-                })
-            }
-        except Exception as e:
-            print(f"Error incrementing counter: {e}")
-            return {
-                'statusCode': 500,
-                'headers': response_headers,
-                'body': json.dumps({
-                    'error': 'Internal server error',
-                    'message': str(e)
-                })
-            }
-
-    # 404 for other paths
     return {
-        'statusCode': 404,
-        'headers': response_headers,
-        'body': json.dumps({
-            'error': 'Not found',
-            'path': path,
-            'method': method
-        })
+        "email": jwt_payload.get('email', 'unknown'),
+        "payload": jwt_payload
     }
+
+
+# --- Routes ---
+
+@app.get("/api/status")
+async def status(user: dict = Depends(get_current_user)):
+    return {
+        "status": "ok",
+        "message": "API is working",
+        "authenticated_user": user["email"],
+        "environment": "production"
+    }
+
+
+@app.get("/api/counter")
+async def get_counter(user: dict = Depends(get_current_user)):
+    db = get_db()
+    try:
+        cursor = db.cursor()
+        cursor.execute('SELECT value FROM counter WHERE id = 1')
+        result = cursor.fetchone()
+        return {
+            "counter": result[0] if result else 0,
+            "authenticated_user": user["email"]
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/counter")
+async def increment_counter(user: dict = Depends(get_current_user)):
+    db = get_db()
+    try:
+        cursor = db.cursor()
+        cursor.execute('UPDATE counter SET value = value + 1 WHERE id = 1')
+        db.commit()
+        cursor.execute('SELECT value FROM counter WHERE id = 1')
+        result = cursor.fetchone()
+        return {
+            "counter": result[0] if result else 0,
+            "authenticated_user": user["email"],
+            "action": "incremented"
+        }
+    finally:
+        db.close()
+
+
+# --- Lightsail ---
+
+lightsail = boto3.client('lightsail', region_name='us-east-1')
+
+
+@app.get("/api/instances")
+async def list_instances(user: dict = Depends(get_current_user)):
+    """List all Lightsail instances"""
+    try:
+        response = lightsail.get_instances()
+        instances = []
+        for inst in response.get('instances', []):
+            instances.append({
+                "name": inst['name'],
+                "state": inst['state']['name'],
+                "publicIp": inst.get('publicIpAddress'),
+                "privateIp": inst.get('privateIpAddress'),
+                "blueprintId": inst.get('blueprintId'),
+                "bundleId": inst.get('bundleId'),
+                "region": inst['location']['regionName'],
+                "createdAt": inst['createdAt'].isoformat() if inst.get('createdAt') else None
+            })
+        return {"instances": instances, "provider": "lightsail"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/instances/{name}")
+async def get_instance(name: str, user: dict = Depends(get_current_user)):
+    """Get a specific Lightsail instance"""
+    try:
+        response = lightsail.get_instance(instanceName=name)
+        inst = response['instance']
+        return {
+            "name": inst['name'],
+            "state": inst['state']['name'],
+            "publicIp": inst.get('publicIpAddress'),
+            "privateIp": inst.get('privateIpAddress'),
+            "blueprintId": inst.get('blueprintId'),
+            "bundleId": inst.get('bundleId'),
+            "region": inst['location']['regionName'],
+            "createdAt": inst['createdAt'].isoformat() if inst.get('createdAt') else None
+        }
+    except lightsail.exceptions.NotFoundException:
+        raise HTTPException(status_code=404, detail=f"Instance '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/instances/{name}/start")
+async def start_instance(name: str, user: dict = Depends(get_current_user)):
+    """Start a Lightsail instance"""
+    try:
+        lightsail.start_instance(instanceName=name)
+        return {"status": "starting", "instance": name, "action_by": user["email"]}
+    except lightsail.exceptions.NotFoundException:
+        raise HTTPException(status_code=404, detail=f"Instance '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/instances/{name}/stop")
+async def stop_instance(name: str, user: dict = Depends(get_current_user)):
+    """Stop a Lightsail instance"""
+    try:
+        lightsail.stop_instance(instanceName=name)
+        return {"status": "stopping", "instance": name, "action_by": user["email"]}
+    except lightsail.exceptions.NotFoundException:
+        raise HTTPException(status_code=404, detail=f"Instance '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/instances/{name}/reboot")
+async def reboot_instance(name: str, user: dict = Depends(get_current_user)):
+    """Reboot a Lightsail instance"""
+    try:
+        lightsail.reboot_instance(instanceName=name)
+        return {"status": "rebooting", "instance": name, "action_by": user["email"]}
+    except lightsail.exceptions.NotFoundException:
+        raise HTTPException(status_code=404, detail=f"Instance '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/instances/{name}")
+async def delete_instance(name: str, user: dict = Depends(get_current_user)):
+    """Delete a Lightsail instance"""
+    try:
+        lightsail.delete_instance(instanceName=name)
+        return {"status": "deleting", "instance": name, "action_by": user["email"]}
+    except lightsail.exceptions.NotFoundException:
+        raise HTTPException(status_code=404, detail=f"Instance '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/blueprints")
+async def list_blueprints(user: dict = Depends(get_current_user)):
+    """List available Lightsail blueprints (OS images)"""
+    try:
+        response = lightsail.get_blueprints(includeInactive=False)
+        blueprints = []
+        for bp in response.get('blueprints', []):
+            if bp.get('isActive'):
+                blueprints.append({
+                    "id": bp['blueprintId'],
+                    "name": bp['name'],
+                    "group": bp.get('group'),
+                    "type": bp['type'],
+                    "description": bp.get('description', '')
+                })
+        return {"blueprints": blueprints}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/bundles")
+async def list_bundles(user: dict = Depends(get_current_user)):
+    """List available Lightsail bundles (instance sizes)"""
+    try:
+        response = lightsail.get_bundles(includeInactive=False)
+        bundles = []
+        for b in response.get('bundles', []):
+            if b.get('isActive'):
+                bundles.append({
+                    "id": b['bundleId'],
+                    "name": b['name'],
+                    "price": b['price'],
+                    "cpuCount": b['cpuCount'],
+                    "ramSizeInGb": b['ramSizeInGb'],
+                    "diskSizeInGb": b['diskSizeInGb'],
+                    "transferPerMonthInGb": b['transferPerMonthInGb']
+                })
+        return {"bundles": bundles}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/keypairs")
+async def list_keypairs(user: dict = Depends(get_current_user)):
+    """List available Lightsail key pairs"""
+    try:
+        response = lightsail.get_key_pairs()
+        keypairs = [{"name": kp['name'], "fingerprint": kp.get('fingerprint')}
+                    for kp in response.get('keyPairs', [])]
+        return {"keypairs": keypairs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from pydantic import BaseModel
+
+class CreateInstanceRequest(BaseModel):
+    name: str
+    blueprintId: str
+    bundleId: str
+    availabilityZone: str = "us-east-1a"
+    keyPairName: str | None = None
+
+
+@app.post("/api/instances")
+async def create_instance(req: CreateInstanceRequest, user: dict = Depends(get_current_user)):
+    """Create a new Lightsail instance"""
+    try:
+        params = {
+            "instanceNames": [req.name],
+            "availabilityZone": req.availabilityZone,
+            "blueprintId": req.blueprintId,
+            "bundleId": req.bundleId
+        }
+        if req.keyPairName:
+            params["keyPairName"] = req.keyPairName
+
+        lightsail.create_instances(**params)
+        return {
+            "status": "creating",
+            "instance": req.name,
+            "blueprint": req.blueprintId,
+            "bundle": req.bundleId,
+            "action_by": user["email"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Lambda handler
+lambda_handler = Mangum(app)
