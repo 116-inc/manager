@@ -320,33 +320,109 @@ from pydantic import BaseModel
 
 class CreateInstanceRequest(BaseModel):
     name: str
-    blueprintId: str
     bundleId: str
     availabilityZone: str = "us-east-1a"
     keyPairName: str | None = None
+    blueprintId: str | None = None
+    snapshotName: str | None = None
 
 
 @app.post("/api/instances")
 async def create_instance(req: CreateInstanceRequest, user: dict = Depends(get_current_user)):
-    """Create a new Lightsail instance"""
+    """Create a new Lightsail instance from blueprint or snapshot"""
     try:
-        params = {
-            "instanceNames": [req.name],
-            "availabilityZone": req.availabilityZone,
-            "blueprintId": req.blueprintId,
-            "bundleId": req.bundleId
-        }
-        if req.keyPairName:
-            params["keyPairName"] = req.keyPairName
+        if req.snapshotName:
+            # Create from snapshot
+            params = {
+                "instanceNames": [req.name],
+                "availabilityZone": req.availabilityZone,
+                "bundleId": req.bundleId,
+                "instanceSnapshotName": req.snapshotName
+            }
+            if req.keyPairName:
+                params["keyPairName"] = req.keyPairName
+            lightsail.create_instances_from_snapshot(**params)
+            return {
+                "status": "creating",
+                "instance": req.name,
+                "snapshot": req.snapshotName,
+                "bundle": req.bundleId,
+                "action_by": user["email"]
+            }
+        elif req.blueprintId:
+            # Create from blueprint
+            params = {
+                "instanceNames": [req.name],
+                "availabilityZone": req.availabilityZone,
+                "blueprintId": req.blueprintId,
+                "bundleId": req.bundleId
+            }
+            if req.keyPairName:
+                params["keyPairName"] = req.keyPairName
+            lightsail.create_instances(**params)
+            return {
+                "status": "creating",
+                "instance": req.name,
+                "blueprint": req.blueprintId,
+                "bundle": req.bundleId,
+                "action_by": user["email"]
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Either blueprintId or snapshotName required")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        lightsail.create_instances(**params)
+
+# --- Snapshots ---
+
+@app.get("/api/snapshots")
+async def list_snapshots(user: dict = Depends(get_current_user)):
+    """List all Lightsail instance snapshots"""
+    try:
+        response = lightsail.get_instance_snapshots()
+        snapshots = []
+        for snap in response.get('instanceSnapshots', []):
+            snapshots.append({
+                "name": snap['name'],
+                "state": snap['state'],
+                "fromInstanceName": snap.get('fromInstanceName'),
+                "sizeInGb": snap.get('sizeInGb'),
+                "createdAt": snap['createdAt'].isoformat() if snap.get('createdAt') else None
+            })
+        return {"snapshots": snapshots}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CreateSnapshotRequest(BaseModel):
+    instanceName: str
+    snapshotName: str
+
+
+@app.post("/api/snapshots")
+async def create_snapshot(req: CreateSnapshotRequest, user: dict = Depends(get_current_user)):
+    """Create a snapshot from an instance"""
+    try:
+        lightsail.create_instance_snapshot(
+            instanceName=req.instanceName,
+            instanceSnapshotName=req.snapshotName
+        )
         return {
             "status": "creating",
-            "instance": req.name,
-            "blueprint": req.blueprintId,
-            "bundle": req.bundleId,
+            "snapshot": req.snapshotName,
+            "fromInstance": req.instanceName,
             "action_by": user["email"]
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/snapshots/{name}")
+async def delete_snapshot(name: str, user: dict = Depends(get_current_user)):
+    """Delete a snapshot"""
+    try:
+        lightsail.delete_instance_snapshot(instanceSnapshotName=name)
+        return {"status": "deleting", "snapshot": name, "action_by": user["email"]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
