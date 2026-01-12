@@ -1,0 +1,6 @@
+package/
+info_package/
+*.zip
+__pycache__/
+*.pyc
+.env
