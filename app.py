@@ -3,7 +3,11 @@ import jwt
 import requests
 import os
 import sqlite3
+import time
+import hashlib
+import hmac
 import boto3
+from urllib.parse import urlencode
 from fastapi import FastAPI, Request, HTTPException, Depends
 from mangum import Mangum
 
@@ -165,9 +169,12 @@ async def increment_counter(user: dict = Depends(get_current_user)):
         db.close()
 
 
-# --- Lightsail ---
+# --- AWS Clients ---
 
 lightsail = boto3.client('lightsail', region_name='us-east-1')
+secretsmanager = boto3.client('secretsmanager', region_name='us-east-1')
+
+SECRETS_PREFIX = "moontrader/"
 
 
 @app.get("/api/instances")
@@ -325,12 +332,23 @@ class CreateInstanceRequest(BaseModel):
     keyPairName: str | None = None
     blueprintId: str | None = None
     snapshotName: str | None = None
+    subaccount: str | None = None  # Link to subaccount for IP whitelisting
 
 
 @app.post("/api/instances")
 async def create_instance(req: CreateInstanceRequest, user: dict = Depends(get_current_user)):
     """Create a new Lightsail instance from blueprint or snapshot"""
     try:
+        # Verify subaccount exists if provided
+        subaccount_data = None
+        if req.subaccount:
+            try:
+                secret_name = f"{SECRETS_PREFIX}{req.subaccount}"
+                secret_response = secretsmanager.get_secret_value(SecretId=secret_name)
+                subaccount_data = json.loads(secret_response['SecretString'])
+            except secretsmanager.exceptions.ResourceNotFoundException:
+                raise HTTPException(status_code=404, detail=f"Subaccount '{req.subaccount}' not found")
+
         if req.snapshotName:
             # Create from snapshot
             params = {
@@ -342,12 +360,35 @@ async def create_instance(req: CreateInstanceRequest, user: dict = Depends(get_c
             if req.keyPairName:
                 params["keyPairName"] = req.keyPairName
             lightsail.create_instances_from_snapshot(**params)
+
+            # Store instance-subaccount mapping in database
+            if req.subaccount:
+                db = get_db()
+                try:
+                    cursor = db.cursor()
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS instance_subaccounts (
+                            instance_name TEXT PRIMARY KEY,
+                            subaccount_name TEXT NOT NULL,
+                            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    cursor.execute(
+                        'INSERT OR REPLACE INTO instance_subaccounts (instance_name, subaccount_name) VALUES (?, ?)',
+                        (req.name, req.subaccount)
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+
             return {
                 "status": "creating",
                 "instance": req.name,
                 "snapshot": req.snapshotName,
                 "bundle": req.bundleId,
-                "action_by": user["email"]
+                "subaccount": req.subaccount,
+                "action_by": user["email"],
+                "note": "Instance is booting. Check instance details for IP once running."
             }
         elif req.blueprintId:
             # Create from blueprint
@@ -360,15 +401,40 @@ async def create_instance(req: CreateInstanceRequest, user: dict = Depends(get_c
             if req.keyPairName:
                 params["keyPairName"] = req.keyPairName
             lightsail.create_instances(**params)
+
+            # Store instance-subaccount mapping in database
+            if req.subaccount:
+                db = get_db()
+                try:
+                    cursor = db.cursor()
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS instance_subaccounts (
+                            instance_name TEXT PRIMARY KEY,
+                            subaccount_name TEXT NOT NULL,
+                            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    cursor.execute(
+                        'INSERT OR REPLACE INTO instance_subaccounts (instance_name, subaccount_name) VALUES (?, ?)',
+                        (req.name, req.subaccount)
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+
             return {
                 "status": "creating",
                 "instance": req.name,
                 "blueprint": req.blueprintId,
                 "bundle": req.bundleId,
-                "action_by": user["email"]
+                "subaccount": req.subaccount,
+                "action_by": user["email"],
+                "note": "Instance is booting. Check instance details for IP once running."
             }
         else:
             raise HTTPException(status_code=400, detail="Either blueprintId or snapshotName required")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -425,6 +491,196 @@ async def delete_snapshot(name: str, user: dict = Depends(get_current_user)):
         return {"status": "deleting", "snapshot": name, "action_by": user["email"]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Subaccounts (Secrets Manager) ---
+
+class SubaccountRequest(BaseModel):
+    name: str
+    binance_api_key: str
+    binance_secret_key: str
+    client_token: str
+    activation_code: str
+    profile_name: str
+
+
+class SubaccountUpdateRequest(BaseModel):
+    binance_api_key: str | None = None
+    binance_secret_key: str | None = None
+    client_token: str | None = None
+    activation_code: str | None = None
+    profile_name: str | None = None
+
+
+@app.get("/api/subaccounts")
+async def list_subaccounts(user: dict = Depends(get_current_user)):
+    """List all subaccounts (secrets with moontrader/ prefix)"""
+    try:
+        response = secretsmanager.list_secrets(
+            Filters=[{"Key": "name", "Values": [SECRETS_PREFIX]}]
+        )
+        subaccounts = []
+        for secret in response.get('SecretList', []):
+            name = secret['Name'].replace(SECRETS_PREFIX, '')
+            subaccounts.append({
+                "name": name,
+                "createdAt": secret.get('CreatedDate').isoformat() if secret.get('CreatedDate') else None,
+                "lastChanged": secret.get('LastChangedDate').isoformat() if secret.get('LastChangedDate') else None
+            })
+        return {"subaccounts": subaccounts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/subaccounts/{name}")
+async def get_subaccount(name: str, user: dict = Depends(get_current_user)):
+    """Get a specific subaccount (masked secrets)"""
+    try:
+        secret_name = f"{SECRETS_PREFIX}{name}"
+        response = secretsmanager.get_secret_value(SecretId=secret_name)
+        secret_data = json.loads(response['SecretString'])
+
+        # Mask sensitive values
+        return {
+            "name": name,
+            "binance_api_key": secret_data.get('binance_api_key', '')[:8] + '...' if secret_data.get('binance_api_key') else None,
+            "binance_secret_key": "********" if secret_data.get('binance_secret_key') else None,
+            "client_token": secret_data.get('client_token', '')[:8] + '...' if secret_data.get('client_token') else None,
+            "activation_code": "********" if secret_data.get('activation_code') else None,
+            "profile_name": secret_data.get('profile_name')
+        }
+    except secretsmanager.exceptions.ResourceNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Subaccount '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/subaccounts")
+async def create_subaccount(req: SubaccountRequest, user: dict = Depends(get_current_user)):
+    """Create a new subaccount"""
+    try:
+        secret_name = f"{SECRETS_PREFIX}{req.name}"
+        secret_data = {
+            "binance_api_key": req.binance_api_key,
+            "binance_secret_key": req.binance_secret_key,
+            "client_token": req.client_token,
+            "activation_code": req.activation_code,
+            "profile_name": req.profile_name
+        }
+
+        secretsmanager.create_secret(
+            Name=secret_name,
+            SecretString=json.dumps(secret_data),
+            Tags=[{"Key": "managed_by", "Value": "instance-manager"}]
+        )
+
+        return {
+            "status": "created",
+            "subaccount": req.name,
+            "action_by": user["email"]
+        }
+    except secretsmanager.exceptions.ResourceExistsException:
+        raise HTTPException(status_code=409, detail=f"Subaccount '{req.name}' already exists")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/subaccounts/{name}")
+async def update_subaccount(name: str, req: SubaccountUpdateRequest, user: dict = Depends(get_current_user)):
+    """Update an existing subaccount"""
+    try:
+        secret_name = f"{SECRETS_PREFIX}{name}"
+
+        # Get existing secret
+        response = secretsmanager.get_secret_value(SecretId=secret_name)
+        secret_data = json.loads(response['SecretString'])
+
+        # Update only provided fields
+        if req.binance_api_key is not None:
+            secret_data['binance_api_key'] = req.binance_api_key
+        if req.binance_secret_key is not None:
+            secret_data['binance_secret_key'] = req.binance_secret_key
+        if req.client_token is not None:
+            secret_data['client_token'] = req.client_token
+        if req.activation_code is not None:
+            secret_data['activation_code'] = req.activation_code
+        if req.profile_name is not None:
+            secret_data['profile_name'] = req.profile_name
+
+        secretsmanager.update_secret(
+            SecretId=secret_name,
+            SecretString=json.dumps(secret_data)
+        )
+
+        return {
+            "status": "updated",
+            "subaccount": name,
+            "action_by": user["email"]
+        }
+    except secretsmanager.exceptions.ResourceNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Subaccount '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/subaccounts/{name}")
+async def delete_subaccount(name: str, user: dict = Depends(get_current_user)):
+    """Delete a subaccount"""
+    try:
+        secret_name = f"{SECRETS_PREFIX}{name}"
+        secretsmanager.delete_secret(SecretId=secret_name, ForceDeleteWithoutRecovery=True)
+        return {"status": "deleted", "subaccount": name, "action_by": user["email"]}
+    except secretsmanager.exceptions.ResourceNotFoundException:
+        raise HTTPException(status_code=404, detail=f"Subaccount '{name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Binance API ---
+
+def binance_sign(params: dict, secret_key: str) -> str:
+    """Create HMAC SHA256 signature for Binance API"""
+    query_string = urlencode(params)
+    signature = hmac.new(
+        secret_key.encode('utf-8'),
+        query_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
+
+
+def binance_api_request(method: str, endpoint: str, api_key: str, secret_key: str, params: dict = None):
+    """Make authenticated request to Binance API"""
+    base_url = "https://api.binance.com"
+
+    if params is None:
+        params = {}
+
+    params['timestamp'] = int(time.time() * 1000)
+    params['signature'] = binance_sign(params, secret_key)
+
+    headers = {"X-MBX-APIKEY": api_key}
+
+    if method == "GET":
+        response = requests.get(f"{base_url}{endpoint}", params=params, headers=headers, timeout=10)
+    elif method == "POST":
+        response = requests.post(f"{base_url}{endpoint}", params=params, headers=headers, timeout=10)
+    else:
+        raise ValueError(f"Unsupported method: {method}")
+
+    return response.json()
+
+
+def whitelist_ip_binance(api_key: str, secret_key: str, ip_address: str):
+    """Add IP to Binance API key whitelist"""
+    # Note: Binance doesn't have a direct API to whitelist IPs programmatically
+    # This requires using the sub-account API if available
+    # For now, return info about manual whitelisting requirement
+    return {
+        "status": "manual_required",
+        "message": f"Please manually whitelist IP {ip_address} in Binance API settings",
+        "ip": ip_address
+    }
 
 
 # Lambda handler

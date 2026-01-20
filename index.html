@@ -140,6 +140,12 @@
                             <option value="">None</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label>Subaccount (Optional)</label>
+                        <select id="subaccount-select">
+                            <option value="">None</option>
+                        </select>
+                    </div>
                 </div>
                 <button type="submit" class="btn-primary" id="create-btn">Create Instance</button>
             </form>
@@ -162,6 +168,49 @@
             </h2>
             <div id="snapshots-container">
                 <div class="loading">Loading snapshots...</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>
+                Subaccounts (API Keys)
+                <button onclick="loadSubaccounts()" class="btn-sm btn-secondary refresh-btn">Refresh</button>
+            </h2>
+            <div id="subaccount-form" style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="sa-name" placeholder="e.g. main-account" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Profile Name</label>
+                        <input type="text" id="sa-profile" placeholder="Profile name for MoonTrader" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Binance API Key</label>
+                        <input type="text" id="sa-api-key" placeholder="Binance API key" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Binance Secret Key</label>
+                        <input type="password" id="sa-secret-key" placeholder="Binance secret key" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Client Token</label>
+                        <input type="text" id="sa-client-token" placeholder="MoonTrader client token" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Activation Code</label>
+                        <input type="text" id="sa-activation-code" placeholder="MoonTrader activation code" required>
+                    </div>
+                </div>
+                <button onclick="createSubaccount()" class="btn-primary">Add Subaccount</button>
+            </div>
+            <div id="subaccounts-container">
+                <div class="loading">Loading subaccounts...</div>
             </div>
         </div>
     </div>
@@ -367,6 +416,9 @@
                 const keypair = document.getElementById('keypair').value;
                 if (keypair) payload.keyPairName = keypair;
 
+                const subaccount = document.getElementById('subaccount-select').value;
+                if (subaccount) payload.subaccount = subaccount;
+
                 await api('/api/instances', { method: 'POST', body: JSON.stringify(payload) });
                 showMessage(`Instance "${payload.name}" is being created...`);
                 document.getElementById('instance-name').value = '';
@@ -421,13 +473,117 @@
             } catch (e) { showMessage(e.message, 'error'); }
         }
 
+        // --- Subaccounts ---
+
+        async function loadSubaccounts() {
+            const container = document.getElementById('subaccounts-container');
+            container.innerHTML = '<div class="loading">Loading subaccounts...</div>';
+            try {
+                const data = await api('/api/subaccounts');
+                if (data.subaccounts.length === 0) {
+                    container.innerHTML = '<p>No subaccounts found. Create one above.</p>';
+                    return;
+                }
+                container.innerHTML = '<div class="grid">' +
+                    data.subaccounts.map(sa => `
+                        <div class="instance-card">
+                            <div class="instance-header">
+                                <span class="instance-name">${sa.name}</span>
+                            </div>
+                            <div class="details">
+                                <div><strong>Created:</strong> ${sa.createdAt ? new Date(sa.createdAt).toLocaleString() : 'N/A'}</div>
+                                <div><strong>Last Changed:</strong> ${sa.lastChanged ? new Date(sa.lastChanged).toLocaleString() : 'N/A'}</div>
+                            </div>
+                            <div class="actions">
+                                <button class="btn-sm btn-primary" onclick="viewSubaccount('${sa.name}')">View</button>
+                                <button class="btn-danger btn-sm" onclick="deleteSubaccount('${sa.name}')">Delete</button>
+                            </div>
+                        </div>
+                    `).join('') +
+                '</div>';
+            } catch (e) {
+                container.innerHTML = `<div class="error">Failed to load subaccounts: ${e.message}</div>`;
+            }
+        }
+
+        async function loadSubaccountsDropdown() {
+            try {
+                const data = await api('/api/subaccounts');
+                const select = document.getElementById('subaccount-select');
+                select.innerHTML = '<option value="">None</option>';
+                data.subaccounts.forEach(sa => {
+                    const opt = document.createElement('option');
+                    opt.value = sa.name;
+                    opt.textContent = sa.name;
+                    select.appendChild(opt);
+                });
+            } catch (e) { console.error('Failed to load subaccounts dropdown:', e); }
+        }
+
+        async function createSubaccount() {
+            const name = document.getElementById('sa-name').value.trim();
+            const profile_name = document.getElementById('sa-profile').value.trim();
+            const binance_api_key = document.getElementById('sa-api-key').value.trim();
+            const binance_secret_key = document.getElementById('sa-secret-key').value.trim();
+            const client_token = document.getElementById('sa-client-token').value.trim();
+            const activation_code = document.getElementById('sa-activation-code').value.trim();
+
+            if (!name || !profile_name || !binance_api_key || !binance_secret_key || !client_token || !activation_code) {
+                showMessage('Please fill in all fields', 'error');
+                return;
+            }
+
+            try {
+                await api('/api/subaccounts', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, profile_name, binance_api_key, binance_secret_key, client_token, activation_code })
+                });
+                showMessage(`Subaccount "${name}" created successfully`);
+                // Clear form
+                document.getElementById('sa-name').value = '';
+                document.getElementById('sa-profile').value = '';
+                document.getElementById('sa-api-key').value = '';
+                document.getElementById('sa-secret-key').value = '';
+                document.getElementById('sa-client-token').value = '';
+                document.getElementById('sa-activation-code').value = '';
+                loadSubaccounts();
+                loadSubaccountsDropdown();
+            } catch (e) { showMessage(e.message, 'error'); }
+        }
+
+        async function viewSubaccount(name) {
+            try {
+                const data = await api(`/api/subaccounts/${name}`);
+                alert(
+                    `Subaccount: ${data.name}\n` +
+                    `Profile: ${data.profile_name}\n` +
+                    `API Key: ${data.binance_api_key}\n` +
+                    `Secret Key: ${data.binance_secret_key}\n` +
+                    `Client Token: ${data.client_token}\n` +
+                    `Activation Code: ${data.activation_code}`
+                );
+            } catch (e) { showMessage(e.message, 'error'); }
+        }
+
+        async function deleteSubaccount(name) {
+            if (!confirm(`Delete subaccount "${name}"? This will remove all stored credentials.`)) return;
+            try {
+                await api(`/api/subaccounts/${name}`, { method: 'DELETE' });
+                showMessage(`Subaccount "${name}" deleted`);
+                loadSubaccounts();
+                loadSubaccountsDropdown();
+            } catch (e) { showMessage(e.message, 'error'); }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             loadBlueprints();
             loadBundles();
             loadKeypairs();
             loadSnapshotsDropdown();
+            loadSubaccountsDropdown();
             loadInstances();
             loadSnapshots();
+            loadSubaccounts();
         });
     </script>
 </body>
